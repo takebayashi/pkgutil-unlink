@@ -1,0 +1,90 @@
+#!/usr/bin/perl
+
+=pod
+
+=head1 NAME
+
+pkgutil-unlink
+
+=head1 SYNOPSIS
+
+pkgutil-unlink [--dryrun] package_id
+
+pkgutil-unlink --help
+
+=cut
+
+use 5.018;
+use strict;
+
+use Getopt::Long qw(:config posix_default auto_help);
+use Pod::Usage qw(pod2usage);
+
+sub get_volume {
+  my $pkg = shift;
+  my $vol;
+  open(my $fh, '-|', "pkgutil --pkg-info $pkg") or return undef;
+  while (<$fh>) {
+    chomp;
+    if (/^volume: (.+)$/) {
+      $vol = $1;
+    }
+  }
+  close($fh);
+  return $vol;
+}
+
+sub get_files {
+  my $pkg = shift;
+  open(my $fh, '-|', "pkgutil --only-file --files $pkg") or return ();
+  my @files = map { chomp; $_ } <$fh>;
+  close($fh);
+  return @files;
+}
+
+sub get_dirs {
+  my $pkg = shift;
+  open(my $fh, '-|', "pkgutil --only-dir --files $pkg") or return ();
+  my @dirs = map { chomp; $_ } <$fh>;
+  close($fh);
+  return @dirs;
+}
+
+sub is_empty_dir {
+  my $dir = shift;
+  my $empty = 1;
+  opendir(my $dh, $dir);
+  while (readdir $dh) {
+    next if /^\.\.?$/;
+    $empty = 0;
+  }
+  closedir($dh);
+  return $empty;
+}
+
+GetOptions(\my %args, 'dryrun|n') or pod2usage(-verbose => 1);
+my $pkg = shift or pod2usage(-verbose => 1);
+my $is_dryrun = $args{'dryrun'} // 0;
+
+
+my $vol = get_volume($pkg) or die "unknown package: $pkg";
+
+for my $file (get_files($pkg)) {
+  my $path = "$vol$file";
+  if (-f $path) {
+    print "unlink $path\n";
+    unless ($is_dryrun) {
+      unlink $path or warn "failed: $path";
+    }
+  }
+}
+
+for my $dir (get_dirs($pkg)) {
+  my $path = "$vol$dir";
+  if (-d $path and is_empty_dir($path)) {
+    print "rmdir $path\n";
+    unless ($is_dryrun) {
+      rmdir $path or warn "failed: $path";
+    }
+  }
+}
